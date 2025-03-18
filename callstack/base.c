@@ -41,6 +41,11 @@ void func1(int arg1, int arg2, int arg3);
 void func2(int arg1, int arg2);
 void func3(int arg1);
 
+void push(int value, char *str);
+void prologue();
+void epilogue();
+
+
 /*  
     현재 call_stack 전체를 출력합니다.
     해당 함수의 출력 결과들을 바탕으로 구현 완성도를 평가할 예정입니다.
@@ -72,12 +77,41 @@ void print_stack()
     printf("================================\n\n");
 }
 
+void prologue(char *str)
+{
+    push(-1,"Return Address");
+    push(fp,str);
+
+
+}
+//Return address는 callstack에 -1로 값을 두어야 나중에 출력이 안됨
+//
+
+void epilogue()
+{
+
+}
+
+void push(int value, char *str) {
+    
+    SP++; // Stack Pointer 증가
+    call_stack[SP] = value;
+    snprintf(stack_info[SP], sizeof(stack_info[SP]), "%s", str); //stack_info에 정보저장
+
+}//앞 밸류는 call_stack에 저장되는 숫자, 뒤 밸류는 stack_info에 저장되는 숫자 
+
 
 //func 내부는 자유롭게 추가해도 괜찮으나, 아래의 구조를 바꾸지는 마세요
 void func1(int arg1, int arg2, int arg3)
 {
+    push(arg1,"arg1");
+    push(arg2,"arg2");
+    push(arg3,"arg3");
+
     int var_1 = 100;
 
+    prologue("func1");
+    push(100, "var_1")
     // func1의 스택 프레임 형성 (함수 프롤로그 + push)
     print_stack();
     func2(11, 13);
@@ -88,8 +122,13 @@ void func1(int arg1, int arg2, int arg3)
 
 void func2(int arg1, int arg2)
 {
+    push(arg1,"arg1");
+    push(arg2,"arg2");
+
     int var_2 = 200;
 
+    prologue("func2");
+    push(200,"var_2")
     // func2의 스택 프레임 형성 (함수 프롤로그 + push)
     print_stack();
     func3(77);
@@ -100,8 +139,12 @@ void func2(int arg1, int arg2)
 
 void func3(int arg1)
 {
+    push(arg1,"arg1");
+    prologue("func3");
     int var_3 = 300;
     int var_4 = 400;
+    push(300,"var3");
+    push(400,"var4");
 
     // func3의 스택 프레임 형성 (함수 프롤로그 + push)
     print_stack();
@@ -116,3 +159,5 @@ int main()
     print_stack();
     return 0;
 }
+
+//구현해야 할것 : pop 구현해야함. 에필로그 함수 구현하기. main stack 프레임은 구현하지 않아도 된다<<??
