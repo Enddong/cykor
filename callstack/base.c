@@ -42,6 +42,7 @@ void func2(int arg1, int arg2);
 void func3(int arg1);
 
 void push(int value, char *str);
+int pop();
 void prologue();
 void epilogue();
 
@@ -80,7 +81,8 @@ void print_stack()
 void prologue(char *str)
 {
     push(-1,"Return Address");
-    push(fp,str);
+    push(FP,str);
+    FP=SP;
 
 
 }
@@ -89,6 +91,9 @@ void prologue(char *str)
 
 void epilogue()
 {
+    SP = FP; // FP가 가리키는 위치까지 스택을 되돌림
+    FP = pop(); // 이전 FP 복원
+    pop(); // Return Address 제거
 
 }
 
@@ -100,6 +105,14 @@ void push(int value, char *str) {
 
 }//앞 밸류는 call_stack에 저장되는 숫자, 뒤 밸류는 stack_info에 저장되는 숫자 
 
+int pop(){
+    if(SP==-1)
+        return -1;
+    int value=call_stack[SP];
+    SP--;
+    return value;
+
+}
 
 //func 내부는 자유롭게 추가해도 괜찮으나, 아래의 구조를 바꾸지는 마세요
 void func1(int arg1, int arg2, int arg3)
@@ -111,12 +124,13 @@ void func1(int arg1, int arg2, int arg3)
     int var_1 = 100;
 
     prologue("func1");
-    push(100, "var_1")
+    push(100, "var_1");
     // func1의 스택 프레임 형성 (함수 프롤로그 + push)
     print_stack();
     func2(11, 13);
     // func2의 스택 프레임 제거 (함수 에필로그 + pop)
     print_stack();
+    epilogue();
 }
 
 
@@ -128,12 +142,13 @@ void func2(int arg1, int arg2)
     int var_2 = 200;
 
     prologue("func2");
-    push(200,"var_2")
+    push(200,"var_2");
     // func2의 스택 프레임 형성 (함수 프롤로그 + push)
     print_stack();
     func3(77);
     // func3의 스택 프레임 제거 (함수 에필로그 + pop)
     print_stack();
+    epilogue();
 }
 
 
@@ -141,13 +156,16 @@ void func3(int arg1)
 {
     push(arg1,"arg1");
     prologue("func3");
+
     int var_3 = 300;
     int var_4 = 400;
+
     push(300,"var3");
     push(400,"var4");
 
     // func3의 스택 프레임 형성 (함수 프롤로그 + push)
     print_stack();
+    epilogue();
 }
 
 
