@@ -2,192 +2,275 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
-#include <dirent.h>
 #include <pwd.h>
 #include <wait.h>
-#include <sys/types.h>
 #include <fcntl.h>
+#include <sys/types.h>
 #include <readline/readline.h>
 #include <readline/history.h>
 
-#define TRUE 1
-#define FALSE 0
-
-char lastdir[100];
-char command[BUFSIZ];
-char argv[100][100];
-char **argvtmp1;
-char argv_redirect[100];
-int argc;
-int BUILTIN_COMMAND = 0;
-int PIPE_COMMAND = 0;
-int REDIRECT_COMMAND = 0;
-int BACKGROUND = 0;
+#define MAX_ARG 100
+#define MAX_CMD 1024
 
 void set_prompt(char *prompt);
-void builtin_command();
-void execute_command(char **args, int input_fd);
-char **parse_arguments(char *cmd);
-void free_arguments(char **args);
-void parse_and_execute(char *line);
-void initial();
-void init_lastdir();
+void execute_command(char *cmd);
 void history_setup();
 void history_finish();
-
-int main() {
-	char prompt[BUFSIZ];
-	char *line;
-	init_lastdir();
-	history_setup();
-	while (1) {
-		set_prompt(prompt);
-		if (!(line = readline(prompt))) break;
-		if (*line) add_history(line);
-		parse_and_execute(line);
-		free(line);
-	}
-	history_finish();
-	return 0;
-}
+int run_builtin(char **args);
+int execute_single(char *cmd);
+int execute_pipeline(char *line);
+int execute_logical(char *line);
+int execute_background(char *line);
+int execute_sequential(char *line);
 
 void set_prompt(char *prompt) {
-	char cwd[100];
-	struct passwd* pwp;
-	pwp = getpwuid(getuid());
-	getcwd(cwd, sizeof(cwd));
-	sprintf(prompt, "[%s@%s:%s]$ ", pwp->pw_name, "localhost", cwd);
-}
-
-void parse_and_execute(char *line) {
-	char *token;
-	char *saveptr;
-	char *sep = line;
-	int exec_next = 1;
-	while ((token = strsep(&sep, ";")) != NULL) {
-		char *cmd = token;
-		if (strstr(cmd, "&&") || strstr(cmd, "||")) {
-			char *sub_saveptr;
-			char *cond_cmd = strtok_r(cmd, "&&||", &sub_saveptr);
-			char *next_cmd = strtok_r(NULL, "", &sub_saveptr);
-			parse_and_execute(cond_cmd);
-			int status;
-			wait(&status);
-			if ((strstr(cmd, "&&") && WIFEXITED(status) && WEXITSTATUS(status) == 0) ||
-				(strstr(cmd, "||") && (!WIFEXITED(status) || WEXITSTATUS(status) != 0))) {
-				parse_and_execute(next_cmd);
-			}
-			continue;
-		}
-		if (strchr(cmd, '&')) {
-			BACKGROUND = 1;
-			cmd[strlen(cmd)-1] = '\0';
-		}
-		char *pipe_save;
-		char *segment = strtok_r(cmd, "|", &pipe_save);
-		int input_fd = 0;
-		while (segment) {
-			char *seg_copy = strdup(segment);
-			char **args = parse_arguments(seg_copy);
-			execute_command(args, input_fd);
-			free(seg_copy);
-			free_arguments(args);
-			segment = strtok_r(NULL, "|", &pipe_save);
-			if (segment) {
-				int pipefd[2];
-				pipe(pipefd);
-				input_fd = pipefd[0];
-				dup2(pipefd[1], STDOUT_FILENO);
-				close(pipefd[1]);
-			}
-		}
-		BACKGROUND = 0;
-	}
-}
-
-char **parse_arguments(char *cmd) {
-	char **args = malloc(sizeof(char*) * 100);
-	int i = 0;
-	char *token = strtok(cmd, " ");
-	while (token != NULL) {
-		if (strcmp(token, ">") == 0) {
-			token = strtok(NULL, " ");
-			if (token) strcpy(argv_redirect, token);
-			REDIRECT_COMMAND = 1;
-			break;
-		}
-		args[i++] = strdup(token);
-		token = strtok(NULL, " ");
-	}
-	args[i] = NULL;
-	return args;
-}
-
-void execute_command(char **args, int input_fd) {
-	if (!args || !args[0]) return;
-	if (strcmp(args[0], "exit") == 0) {
-		exit(EXIT_SUCCESS);
-	} else if (strcmp(args[0], "cd") == 0) {
-		struct passwd* pwp;
-		char cd_path[100];
-		if (!args[1]) {
-			pwp = getpwuid(getuid());
-			sprintf(cd_path,"/home/%s",pwp->pw_name);
-			chdir(cd_path);
-		} else if (strcmp(args[1], "~") == 0) {
-			pwp = getpwuid(getuid());
-			sprintf(cd_path,"/home/%s",pwp->pw_name);
-			chdir(cd_path);
-		} else {
-			chdir(args[1]);
-		}
-		return;
-	}
-	pid_t pid = fork();
-	if (pid == 0) {
-		if (input_fd != 0) {
-			dup2(input_fd, 0);
-			close(input_fd);
-		}
-		if (REDIRECT_COMMAND) {
-			int fd = open(argv_redirect, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-			dup2(fd, STDOUT_FILENO);
-			close(fd);
-		}
-		execvp(args[0], args);
-		perror("exec failed");
-		exit(1);
-	} else {
-		if (!BACKGROUND) waitpid(pid, NULL, 0);
-	}
-	REDIRECT_COMMAND = 0;
-}
-
-void free_arguments(char **args) {
-	for (int i = 0; args[i]; i++) free(args[i]);
-	free(args);
-}
-
-void initial() {
-	for(int i = 0; i < argc; i++) strcpy(argv[i], "\0");
-	argc = 0;
-	BUILTIN_COMMAND = 0;
-	PIPE_COMMAND = 0;
-	REDIRECT_COMMAND = 0;
-	BACKGROUND = 0;
-}
-
-void init_lastdir() {
-	getcwd(lastdir, sizeof(lastdir));
+    char cwd[1024];
+    getcwd(cwd, sizeof(cwd));
+    struct passwd *pw = getpwuid(getuid());
+    sprintf(prompt, "[%s@localhost:%s]$ ", pw->pw_name, cwd);
 }
 
 void history_setup() {
-	using_history();
-	stifle_history(50);
-	read_history("/tmp/msh_history");
+    using_history();
+    stifle_history(50);
+    read_history("/tmp/msh_history");
 }
 
 void history_finish() {
-	append_history(history_length, "/tmp/msh_history");
-	history_truncate_file("/tmp/msh_history", history_max_entries);
+    append_history(history_length, "/tmp/msh_history");
+    history_truncate_file("/tmp/msh_history", 50);
 }
+
+void execute_command(char *line) {
+    if (strchr(line, ';')) {
+        execute_sequential(line);
+    } else if (strstr(line, "&&") || strstr(line, "||")) {
+        execute_logical(line);
+    } else if (strchr(line, '|')) {
+        execute_pipeline(line);
+    } else if (strchr(line, '&')) {
+        execute_background(line);
+    } else {
+        execute_single(line);
+    }
+}
+
+int parse_args(char *cmd, char **args) {
+    int argc = 0;
+    char *token = strtok(cmd, " \t\n");
+    while (token && argc < MAX_ARG - 1) {
+        args[argc++] = token;
+        token = strtok(NULL, " \t\n");
+    }
+    args[argc] = NULL;
+    return argc;
+}
+
+int run_builtin(char **args) {
+    if (!args[0]) return 1;
+    if (strcmp(args[0], "exit") == 0) {
+        exit(0);
+    } else if (strcmp(args[0], "cd") == 0) {
+        const char *path = args[1];
+        if (!path || strcmp(path, "~") == 0) {
+            path = getenv("HOME");
+        }
+        if (chdir(path) != 0) {
+            perror("cd failed");
+            return 1;
+        }
+        return 0;
+    } else if (strcmp(args[0], "pwd") == 0) {
+        char cwd[1024];
+        getcwd(cwd, sizeof(cwd));
+        printf("%s\n", cwd);
+        return 0;
+    }
+    return -1;
+}
+
+int execute_single(char *cmd) {
+    char tmp[1024];
+    char *args[MAX_ARG];
+    strcpy(tmp, cmd);
+
+    char *redir = strchr(tmp, '>');
+    int redirect = 0;
+    char *outfile = NULL;
+
+    if (redir) {
+        *redir = '\0';
+        redir++;
+        while (*redir == ' ') redir++;
+        outfile = strtok(redir, " \t\n");
+        redirect = 1;
+    }
+
+    parse_args(tmp, args);
+    int builtin_result = run_builtin(args);
+    if (builtin_result >= 0) return builtin_result;
+
+    pid_t pid = fork();
+    if (pid == 0) {
+        if (redirect && outfile) {
+            int fd = open(outfile, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+            if (fd < 0) {
+                perror("open failed");
+                exit(1);
+            }
+            dup2(fd, STDOUT_FILENO);
+            close(fd);
+        }
+        execvp(args[0], args);
+        perror("execvp failed");
+        exit(1);
+    } else {
+        int status;
+        waitpid(pid, &status, 0);
+        return WIFEXITED(status) ? WEXITSTATUS(status) : 1;
+    }
+}
+
+int execute_pipeline(char *line) {
+    char *cmds[MAX_ARG];
+    int count = 0;
+    char *cmd = strtok(line, "|");
+
+    while (cmd && count < MAX_ARG - 1) {
+        cmds[count++] = cmd;
+        cmd = strtok(NULL, "|");
+    }
+    cmds[count] = NULL;
+
+    int in_fd = 0, fd[2];
+
+    for (int i = 0; i < count; i++) {
+        pipe(fd);
+        pid_t pid = fork();
+        if (pid == 0) {
+            dup2(in_fd, 0);
+            if (i < count - 1)
+                dup2(fd[1], 1);
+            close(fd[0]);
+
+            char tmp[1024];
+            strcpy(tmp, cmds[i]);
+            char *args[MAX_ARG];
+            parse_args(tmp, args);
+            execvp(args[0], args);
+            perror("execvp failed");
+            exit(1);
+        } else {
+            wait(NULL);
+            close(fd[1]);
+            in_fd = fd[0];
+        }
+    }
+
+    return 0;
+}
+
+int execute_logical(char *line) {
+    char *copy = strdup(line);
+    char *ptr = copy;
+    int last_status = 0;
+
+    while (*ptr) {
+        char *cmd = ptr;
+        char *next = NULL;
+        int is_and = 0, is_or = 0;
+
+        while (*ptr) {
+            if (strncmp(ptr, "&&", 2) == 0) {
+                is_and = 1;
+                *ptr = '\0';
+                next = ptr + 2;
+                break;
+            } else if (strncmp(ptr, "||", 2) == 0) {
+                is_or = 1;
+                *ptr = '\0';
+                next = ptr + 2;
+                break;
+            }
+            ptr++;
+        }
+
+        while (*cmd == ' ') cmd++;
+        char *end = cmd + strlen(cmd) - 1;
+        while (end > cmd && (*end == ' ' || *end == '\n')) {
+            *end = '\0';
+            end--;
+        }
+
+        if (*cmd) {
+            last_status = execute_single(cmd);
+        }
+
+        if (is_and && last_status != 0) break;
+        if (is_or && last_status == 0) break;
+
+        if (!next) break;
+        ptr = next;
+    }
+
+    free(copy);
+    return last_status;
+}
+
+int execute_sequential(char *line) {
+    char *copy = strdup(line);
+    char *rest = copy;
+    char *cmd;
+    int status = 0;
+
+    while ((cmd = strsep(&rest, ";"))) {
+        while (*cmd == ' ') cmd++;
+        char *end = cmd + strlen(cmd) - 1;
+        while (end > cmd && (*end == ' ' || *end == '\n')) {
+            *end = '\0';
+            end--;
+        }
+        if (*cmd) {
+            execute_command(cmd);
+        }
+    }
+
+    free(copy);
+    return status;
+}
+
+int execute_background(char *line) {
+    char *cmd = strtok(line, "&");
+    while (cmd) {
+        pid_t pid = fork();
+        if (pid == 0) {
+            setsid();
+            execute_single(cmd);
+            exit(0);
+        } else {
+            printf("[Background pid %d]\n", pid);
+        }
+        cmd = strtok(NULL, "&");
+    }
+    return 0;
+}
+
+int main() {
+    char prompt[1024];
+    char *line;
+
+    history_setup();
+
+    while (1) {
+        set_prompt(prompt);
+        line = readline(prompt);
+        if (!line) break;
+        if (*line) add_history(line);
+        execute_command(line);
+        free(line);
+    }
+
+    history_finish();
+    return 0;
+}
+
