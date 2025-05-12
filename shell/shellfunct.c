@@ -1,98 +1,11 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <string.h>
-#include <pwd.h>
-#include <wait.h>
-#include <fcntl.h>
-#include <sys/types.h>
-#include <readline/readline.h>
-#include <readline/history.h>
-
-#define MAX_ARG 100
-#define MAX_CMD 1024
-
-void set_prompt(char *prompt);
-void execute_command(char *cmd);
-void history_setup();
-void history_finish();
-int run_builtin(char **args);
-int execute_single(char *cmd);
-int execute_pipeline(char *line);
-int execute_logical(char *line);
-int execute_background(char *line);
-int execute_sequential(char *line);
-
-void set_prompt(char *prompt) {
-    char cwd[1024];
-    getcwd(cwd, sizeof(cwd));
-    struct passwd *pw = getpwuid(getuid());
-    sprintf(prompt, "[%s@localhost:%s]$ ", pw->pw_name, cwd);
-}
-
-void history_setup() {
-    using_history();
-    stifle_history(50);
-    read_history("/tmp/msh_history");
-}
-
-void history_finish() {
-    append_history(history_length, "/tmp/msh_history");
-    history_truncate_file("/tmp/msh_history", 50);
-}
-
-void execute_command(char *line) {
-    if (strchr(line, ';')) {
-        execute_sequential(line);
-    } else if (strstr(line, "&&") || strstr(line, "||")) {
-        execute_logical(line);
-    } else if (strchr(line, '|')) {
-        execute_pipeline(line);
-    } else if (strchr(line, '&')) {
-        execute_background(line);
-    } else {
-        execute_single(line);
-    }
-}
-
-int parse_args(char *cmd, char **args) {
-    int argc = 0;
-    char *token = strtok(cmd, " \t\n");
-    while (token && argc < MAX_ARG - 1) {
-        args[argc++] = token;
-        token = strtok(NULL, " \t\n");
-    }
-    args[argc] = NULL;
-    return argc;
-}
-
-int run_builtin(char **args) {
-    if (!args[0]) return 1;
-    if (strcmp(args[0], "exit") == 0) {
-        exit(0);
-    } else if (strcmp(args[0], "cd") == 0) {
-        const char *path = args[1];
-        if (!path || strcmp(path, "~") == 0) {
-            path = getenv("HOME");
-        }
-        if (chdir(path) != 0) {
-            perror("cd failed");
-            return 1;
-        }
-        return 0;
-    } else if (strcmp(args[0], "pwd") == 0) {
-        char cwd[1024];
-        getcwd(cwd, sizeof(cwd));
-        printf("%s\n", cwd);
-        return 0;
-    }
-    return -1;
-}
+#include "shell.h"
 
 int execute_single(char *cmd) {
     char tmp[1024];
     char *args[MAX_ARG];
-    strcpy(tmp, cmd);
+
+    strncpy(tmp, cmd, sizeof(tmp) - 1);
+    tmp[sizeof(tmp) - 1] = '\0';
 
     char *redir = strchr(tmp, '>');
     int redirect = 0;
@@ -154,7 +67,9 @@ int execute_pipeline(char *line) {
             close(fd[0]);
 
             char tmp[1024];
-            strcpy(tmp, cmds[i]);
+            strncpy(tmp, cmds[i], sizeof(tmp) - 1);
+            tmp[sizeof(tmp) - 1] = '\0';
+
             char *args[MAX_ARG];
             parse_args(tmp, args);
             execvp(args[0], args);
@@ -255,22 +170,4 @@ int execute_background(char *line) {
     return 0;
 }
 
-int main() {
-    char prompt[1024];
-    char *line;
-
-    history_setup();
-
-    while (1) {
-        set_prompt(prompt);
-        line = readline(prompt);
-        if (!line) break;
-        if (*line) add_history(line);
-        execute_command(line);
-        free(line);
-    }
-
-    history_finish();
-    return 0;
-}
 
