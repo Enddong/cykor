@@ -6,6 +6,7 @@ session_start();
 <html>
 <head>
     <meta charset="UTF-8">
+    <link rel="stylesheet" href="css/style.css">
     <title>게시판</title>
 </head>
 <body>
